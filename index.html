@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0d10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Warm-up Alert</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #161a20;
+    --panel-2: #1f252d;
+    --line: #2a313b;
+    --text: #f2f4f7;
+    --muted: #8a94a3;
+    --accent: #ff4d5e;
+    --ok: #2fd27a;
+    --warn: #ffb020;
+    --green: #0f9d58;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 20px);
+  }
+  main { max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 14px;
+    min-height: 56px; padding: 0 18px; font-size: 18px; font-weight: 600;
+    cursor: pointer; touch-action: manipulation;
+  }
+  button:active { transform: scale(.98); filter: brightness(1.2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button[hidden] { display: none; }
+
+  /* Status */
+  .status { display: flex; align-items: center; gap: 10px; font-size: 16px; color: var(--muted); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status.connected .dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  .status.connecting .dot { background: var(--warn); animation: pulse 1s infinite; }
+  .status.lost { color: var(--warn); font-weight: 600; }
+  .status.lost .dot { background: var(--warn); }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .banner {
+    background: #3a2a05; border: 1px solid var(--warn); color: #ffd27a;
+    border-radius: 14px; padding: 14px 16px; font-size: 16px; line-height: 1.35;
+  }
+  .banner[hidden] { display: none; }
+
+  /* HR display */
+  .hr {
+    text-align: center; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 24px; padding: 18px 10px 14px;
+  }
+  .bpm {
+    font-size: clamp(110px, 38vw, 170px); font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; letter-spacing: -4px;
+  }
+  .bpm.stale { color: var(--muted); }
+  .unit { font-size: 20px; color: var(--muted); margin-top: 4px; }
+  .heart { color: var(--accent); display: inline-block; }
+  .heart.beat { animation: beat .25s ease-out; }
+  @keyframes beat { 40% { transform: scale(1.35); } }
+  .hold { margin-top: 10px; font-size: 17px; color: var(--muted); min-height: 22px; }
+  .hold.active { color: var(--warn); font-weight: 600; }
+  .bar { height: 8px; background: var(--panel-2); border-radius: 4px; margin: 10px 18px 0; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--warn); transition: width .3s linear; }
+
+  /* Cards */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px; }
+  .label { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+  .target { display: grid; grid-template-columns: 72px 1fr 72px; gap: 12px; align-items: center; }
+  .target button { font-size: 34px; height: 72px; padding: 0; }
+  .target input {
+    width: 100%; height: 72px; text-align: center; font-size: 44px; font-weight: 700;
+    background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
+    font-variant-numeric: tabular-nums; -webkit-user-select: text; user-select: text;
+  }
+  .target input::-webkit-outer-spin-button, .target input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .target input { -moz-appearance: textfield; }
+  .options { display: flex; flex-direction: column; gap: 8px; }
+  .options button { text-align: left; display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
+  .options button small { color: var(--muted); font-weight: 400; font-size: 14px; }
+  .options button[aria-checked="true"] { border-color: var(--ok); background: #13301f; }
+  .options button[aria-checked="true"]::after { content: "✓"; color: var(--ok); font-size: 22px; margin-left: 10px; }
+  .opt-text { display: flex; flex-direction: column; gap: 2px; }
+
+  .vol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .vol button[aria-checked="true"] { border-color: var(--ok); background: #13301f; }
+  input[type=range] { width: 100%; height: 44px; accent-color: var(--ok); margin: 0 0 6px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .hint { font-size: 13px; color: var(--muted); line-height: 1.4; margin-top: 10px; }
+
+  /* Alert screen */
+  #alert {
+    position: fixed; inset: 0; z-index: 10; background: var(--green);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+    padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 24px);
+    text-align: center;
+  }
+  #alert[hidden] { display: none; }
+  #alert h1 { font-size: clamp(64px, 20vw, 96px); line-height: .95; margin: 0; font-weight: 900; }
+  #alert .abpm { font-size: 40px; font-weight: 700; opacity: .9; font-variant-numeric: tabular-nums; }
+  #alert .tapnote { font-size: 18px; opacity: .85; min-height: 24px; }
+  #alert button { width: 100%; max-width: 360px; min-height: 68px; font-size: 22px; background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.4); }
+  #alert button.primary { background: #fff; color: #0b5d34; border-color: #fff; }
+</style>
+</head>
+<body>
+<main>
+  <div id="status" class="status"><span class="dot"></span><span id="statusText">Not connected</span></div>
+
+  <div id="noBt" class="banner" hidden>
+    Web Bluetooth isn't available in this browser. Open this page in <b>Bluefy</b> on iPhone (or Chrome on Android/desktop).
+  </div>
+  <div id="lostBanner" class="banner" hidden>
+    <b>Disconnected.</b> The heart rate sensor dropped. Tap Reconnect.
+  </div>
+
+  <div class="row">
+    <button id="connectBtn" class="primary">Connect</button>
+    <button id="reconnectBtn" class="primary" hidden>Reconnect</button>
+    <button id="disconnectBtn" hidden>Disconnect</button>
+  </div>
+
+  <section class="hr">
+    <div><span id="bpm" class="bpm stale">--</span></div>
+    <div class="unit"><span id="heart" class="heart">♥</span> BPM</div>
+    <div class="bar"><div id="holdBar"></div></div>
+    <div id="hold" class="hold">Waiting for heart rate…</div>
+  </section>
+
+  <section class="card">
+    <div class="label">Target heart rate</div>
+    <div class="target">
+      <button id="minus" aria-label="Lower target">−</button>
+      <input id="target" type="number" inputmode="numeric" min="40" max="220" step="1" aria-label="Target BPM">
+      <button id="plus" aria-label="Raise target">+</button>
+    </div>
+    <div class="hint">Alerts when your heart rate stays at or above the target for 5 seconds.</div>
+  </section>
+
+  <section class="card">
+    <div class="label">Alert</div>
+    <div id="options" class="options" role="radiogroup"></div>
+  </section>
+
+  <section class="card">
+    <div class="label">Volume</div>
+    <input id="volume" type="range" min="0" max="2" step="1" aria-label="Volume">
+    <div id="volButtons" class="vol" role="radiogroup">
+      <button data-v="0" role="radio">Low</button>
+      <button data-v="1" role="radio">Medium</button>
+      <button data-v="2" role="radio">High</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="testBtn">Test alert</button>
+    </div>
+    <div class="hint">On iPhone, the ring/silent switch can mute web audio. Keep the ringer on (and Bluefy in the foreground) for sound.</div>
+  </section>
+</main>
+
+<div id="alert" hidden>
+  <h1>Warmed up</h1>
+  <div class="abpm"><span id="alertBpm">--</span> BPM</div>
+  <div id="tapNote" class="tapnote"></div>
+  <button id="dismissBtn">Stop chime</button>
+  <button id="resetBtn" class="primary">Reset</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Settings (localStorage, failure-tolerant) ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, String(v)); } catch {} }
+  };
+
+  const HOLD_MS = 5000;
+  const REPEAT_MS = 10000;
+  const VOLUMES = [0.12, 0.35, 0.8];          // master gain for low / medium / high
+  const VOICE_VOLUMES = [0.35, 0.7, 1.0];
+  const OPTIONS = [
+    { id: 'chime',   name: 'Single chime',    desc: 'Two-tone chime, once' },
+    { id: 'repeat',  name: 'Repeating chime', desc: 'Every 10 s until you tap' },
+    { id: 'beep',    name: 'Soft beep',       desc: 'One short, quiet beep' },
+    { id: 'voice',   name: 'Voice',           desc: 'Says “Warmed up”' },
+    { id: 'silent',  name: 'Silent',          desc: 'Screen change only' },
+  ];
+
+  let target = clampTarget(parseInt(store.get('targetBpm', '120'), 10));
+  let alertType = store.get('alertType', 'chime');
+  if (!OPTIONS.some(o => o.id === alertType)) alertType = 'chime';
+  let volume = Math.min(2, Math.max(0, parseInt(store.get('volume', '1'), 10) || 0));
+
+  // ---------- Elements ----------
+  const $ = id => document.getElementById(id);
+  const el = {
+    status: $('status'), statusText: $('statusText'), noBt: $('noBt'), lost: $('lostBanner'),
+    connect: $('connectBtn'), reconnect: $('reconnectBtn'), disconnect: $('disconnectBtn'),
+    bpm: $('bpm'), heart: $('heart'), hold: $('hold'), holdBar: $('holdBar'),
+    target: $('target'), minus: $('minus'), plus: $('plus'),
+    options: $('options'), volume: $('volume'), volButtons: $('volButtons'), test: $('testBtn'),
+    alert: $('alert'), alertBpm: $('alertBpm'), tapNote: $('tapNote'),
+    dismiss: $('dismissBtn'), reset: $('resetBtn'),
+  };
+
+  // ---------- Target ----------
+  function clampTarget(n) { return Number.isFinite(n) ? Math.min(220, Math.max(40, n)) : 120; }
+  function setTarget(n) {
+    target = clampTarget(n);
+    el.target.value = target;
+    store.set('targetBpm', target);
+    aboveSince = null;
+    updateHold();
+  }
+  el.minus.addEventListener('click', () => setTarget(target - 1));
+  el.plus.addEventListener('click', () => setTarget(target + 1));
+  el.target.addEventListener('change', () => setTarget(parseInt(el.target.value, 10)));
+  el.target.addEventListener('keydown', e => { if (e.key === 'Enter') el.target.blur(); });
+  // press-and-hold on +/- for quick changes
+  for (const [btn, step] of [[el.minus, -1], [el.plus, 1]]) {
+    let t1, t2;
+    const stop = () => { clearTimeout(t1); clearInterval(t2); };
+    btn.addEventListener('pointerdown', () => { stop(); t1 = setTimeout(() => { t2 = setInterval(() => setTarget(target + step), 90); }, 450); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, stop));
+  }
+
+  // ---------- Alert option picker ----------
+  for (const o of OPTIONS) {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'radio');
+    b.dataset.id = o.id;
+    b.innerHTML = `<span class="opt-text"><span>${o.name}</span><small>${o.desc}</small></span>`;
+    b.addEventListener('click', () => { alertType = o.id; store.set('alertType', o.id); renderOptions(); });
+    el.options.appendChild(b);
+  }
+  function renderOptions() {
+    for (const b of el.options.children) b.setAttribute('aria-checked', String(b.dataset.id === alertType));
+  }
+
+  // ---------- Volume ----------
+  function setVolume(v) {
+    volume = v; store.set('volume', v);
+    el.volume.value = v;
+    for (const b of el.volButtons.children) b.setAttribute('aria-checked', String(+b.dataset.v === v));
+    if (master) master.gain.value = VOLUMES[volume];
+  }
+  el.volume.addEventListener('input', () => setVolume(+el.volume.value));
+  for (const b of el.volButtons.children) b.addEventListener('click', () => setVolume(+b.dataset.v));
+
+  // ---------- Audio (Web Audio API) ----------
+  let ctx = null, master = null;
+
+  function unlockAudio() {
+    try {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        ctx = new AC();
+        master = ctx.createGain();
+        master.gain.value = VOLUMES[volume];
+        master.connect(ctx.destination);
+      }
+      if (ctx.state !== 'running') ctx.resume();
+      // Play a 1-sample silent buffer inside the gesture to fully unlock iOS.
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.connect(ctx.destination); src.start(0);
+    } catch {}
+    // Unlock speech synthesis with a silent utterance.
+    try {
+      if ('speechSynthesis' in window && !unlockAudio.spoke) {
+        const u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0;
+        speechSynthesis.speak(u);
+        unlockAudio.spoke = true;
+      }
+    } catch {}
+  }
+
+  function tone(freq, start, dur, peak, type = 'sine') {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(start); osc.stop(start + dur + 0.05);
+  }
+
+  function ready() {
+    if (!ctx) return false;
+    if (ctx.state !== 'running') { try { ctx.resume(); } catch {} }
+    master.gain.value = VOLUMES[volume];
+    return true;
+  }
+
+  function playChime() {
+    if (!ready()) return;
+    const t = ctx.currentTime + 0.05;
+    // Note 1: E5 with a soft octave overtone; Note 2: A5 (a rising fourth).
+    tone(659.25, t, 0.9, 0.55);
+    tone(1318.5, t, 0.5, 0.08);
+    tone(880.0, t + 0.22, 1.3, 0.55);
+    tone(1760.0, t + 0.22, 0.7, 0.08);
+  }
+
+  function playBeep() {
+    if (!ready()) return;
+    const t = ctx.currentTime + 0.05;
+    tone(880, t, 0.16, 0.22);   // deliberately quieter than the chime
+  }
+
+  function speak() {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance('Warmed up');
+      u.volume = VOICE_VOLUMES[volume];
+      u.rate = 1;
+      speechSynthesis.speak(u);
+    } catch {}
+  }
+
+  function playOnce(type) {
+    if (type === 'chime' || type === 'repeat') playChime();
+    else if (type === 'beep') playBeep();
+    else if (type === 'voice') speak();
+  }
+
+  el.test.addEventListener('click', () => { unlockAudio(); playOnce(alertType); });
+
+  // ---------- Alert state ----------
+  let armed = true;
+  let aboveSince = null;
+  let repeatTimer = null;
+  let lastBpm = null;
+
+  function fireAlert() {
+    armed = false;
+    aboveSince = null;
+    el.alertBpm.textContent = lastBpm ?? '--';
+    el.alert.hidden = false;
+    const type = alertType;
+    playOnce(type);
+    if (type === 'repeat') {
+      repeatTimer = setInterval(() => playChime(), REPEAT_MS);
+      el.dismiss.hidden = false;
+      el.tapNote.textContent = 'Tap anywhere to stop the chime';
+    } else {
+      el.dismiss.hidden = true;
+      el.tapNote.textContent = '';
+    }
+    try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch {}
+    updateHold();
+  }
+
+  function stopRepeat() {
+    if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+    el.dismiss.hidden = true;
+    el.tapNote.textContent = 'Tap Reset to arm again';
+  }
+
+  function resetAlert() {
+    stopRepeat();
+    try { speechSynthesis.cancel(); } catch {}
+    armed = true;
+    aboveSince = null;
+    el.alert.hidden = true;
+    updateHold();
+  }
+
+  el.alert.addEventListener('click', e => { if (e.target !== el.reset) stopRepeat(); });
+  el.reset.addEventListener('click', e => { e.stopPropagation(); resetAlert(); });
+
+  function updateHold() {
+    let pct = 0;
+    if (!armed) {
+      el.hold.textContent = 'Alert fired — tap Reset to re-arm';
+      el.hold.className = 'hold';
+    } else if (lastBpm == null) {
+      el.hold.textContent = 'Waiting for heart rate…';
+      el.hold.className = 'hold';
+    } else if (aboveSince != null) {
+      const ms = Date.now() - aboveSince;
+      pct = Math.min(100, (ms / HOLD_MS) * 100);
+      const left = Math.max(0, Math.ceil((HOLD_MS - ms) / 1000));
+      el.hold.textContent = `At target — hold ${left}s`;
+      el.hold.className = 'hold active';
+    } else {
+      el.hold.textContent = `${Math.max(0, target - lastBpm)} BPM to go (target ${target})`;
+      el.hold.className = 'hold';
+    }
+    el.holdBar.style.width = pct + '%';
+  }
+
+  // Check the 5-second hold on a timer too, so the alert fires on time
+  // even if the sensor only notifies every second or two.
+  setInterval(() => {
+    if (armed && aboveSince != null && Date.now() - aboveSince >= HOLD_MS) fireAlert();
+    else if (armed && aboveSince != null) updateHold();
+  }, 250);
+
+  function onHeartRate(bpm) {
+    lastBpm = bpm;
+    el.bpm.textContent = bpm;
+    el.bpm.classList.remove('stale');
+    el.alertBpm.textContent = bpm;
+    el.heart.classList.remove('beat'); void el.heart.offsetWidth; el.heart.classList.add('beat');
+
+    if (bpm >= target) {
+      if (aboveSince == null) aboveSince = Date.now();
+      if (armed && Date.now() - aboveSince >= HOLD_MS) { fireAlert(); return; }
+    } else {
+      aboveSince = null;
+    }
+    updateHold();
+  }
+
+  // ---------- Heart Rate Measurement parsing (0x2A37) ----------
+  function parseHeartRate(dv) {
+    const flags = dv.getUint8(0);
+    // Bit 0: 0 = UInt8 heart rate value, 1 = UInt16 (little-endian)
+    return (flags & 0x01) ? dv.getUint16(1, true) : dv.getUint8(1);
+  }
+
+  // ---------- Bluetooth ----------
+  let device = null, characteristic = null, userDisconnect = false;
+
+  function setStatus(kind, text) {
+    el.status.className = 'status ' + kind;
+    el.statusText.textContent = text;
+  }
+
+  function onMeasurement(e) {
+    try {
+      const bpm = parseHeartRate(e.target.value);
+      if (bpm > 0) onHeartRate(bpm);
+    } catch {}
+  }
+
+  async function connectGatt() {
+    setStatus('connecting', `Connecting to ${device.name || 'sensor'}…`);
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('heart_rate');
+    characteristic = await service.getCharacteristic('heart_rate_measurement');
+    characteristic.removeEventListener('characteristicvaluechanged', onMeasurement);
+    characteristic.addEventListener('characteristicvaluechanged', onMeasurement);
+    await characteristic.startNotifications();
+    setStatus('connected', `Connected · ${device.name || 'Heart rate sensor'}`);
+    el.lost.hidden = true;
+    el.connect.hidden = true;
+    el.reconnect.hidden = true;
+    el.disconnect.hidden = false;
+  }
+
+  function onDisconnected() {
+    characteristic = null;
+    lastBpm = null;
+    aboveSince = null;
+    el.bpm.textContent = '--';
+    el.bpm.classList.add('stale');
+    updateHold();
+    el.disconnect.hidden = true;
+    if (userDisconnect) {
+      userDisconnect = false;
+      setStatus('', 'Not connected');
+      el.connect.hidden = false;
+      el.connect.classList.add('primary');
+      el.connect.textContent = 'Connect';
+      el.reconnect.hidden = true;
+      el.lost.hidden = true;
+    } else {
+      setStatus('lost', `Disconnected from ${device?.name || 'sensor'}`);
+      el.lost.hidden = false;
+      el.reconnect.hidden = false;
+      el.connect.hidden = false;
+      el.connect.classList.remove('primary');
+      el.connect.textContent = 'New device';
+      try { navigator.vibrate && navigator.vibrate(400); } catch {}
+    }
+  }
+
+  function showError(err) {
+    if (err && err.name === 'NotFoundError') {
+      // User cancelled the chooser.
+      setStatus(device?.gatt?.connected ? 'connected' : '', device?.gatt?.connected ? 'Connected' : 'Not connected');
+      return;
+    }
+    setStatus('lost', 'Connection failed: ' + (err?.message || err));
+    if (device) el.reconnect.hidden = false;
+  }
+
+  el.connect.addEventListener('click', async () => {
+    unlockAudio();
+    requestWakeLock();
+    if (!navigator.bluetooth) { el.noBt.hidden = false; return; }
+    try {
+      const picked = await navigator.bluetooth.requestDevice({ filters: [{ services: ['heart_rate'] }] });
+      if (device && device !== picked) {
+        device.removeEventListener('gattserverdisconnected', onDisconnected);
+        try { device.gatt.connected && device.gatt.disconnect(); } catch {}
+      }
+      device = picked;
+      device.removeEventListener('gattserverdisconnected', onDisconnected);
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+      await connectGatt();
+    } catch (err) { showError(err); }
+  });
+
+  el.reconnect.addEventListener('click', async () => {
+    unlockAudio();
+    requestWakeLock();
+    if (!device) return;
+    try { await connectGatt(); } catch (err) { showError(err); }
+  });
+
+  el.disconnect.addEventListener('click', () => {
+    if (device?.gatt?.connected) { userDisconnect = true; device.gatt.disconnect(); }
+  });
+
+  // ---------- Screen Wake Lock (optional) ----------
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if (!('wakeLock' in navigator) || wakeLock) return;
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch { wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (device) requestWakeLock();
+      if (ctx && ctx.state !== 'running') { try { ctx.resume(); } catch {} }
+    }
+  });
+
+  // ---------- Init ----------
+  el.target.value = target;
+  renderOptions();
+  setVolume(volume);
+  el.dismiss.hidden = true;
+  if (!navigator.bluetooth) el.noBt.hidden = false;
+  updateHold();
+})();
+</script>
+</body>
+</html>
