@@ -19,6 +19,7 @@
     --ok: #2fd27a;
     --warn: #ffb020;
     --green: #0f9d58;
+    --blue: #1a6fd1;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; }
@@ -81,6 +82,8 @@
   /* Cards */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px; }
   .label { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .modes button[aria-checked="true"] { border-color: var(--ok); background: #13301f; }
   .target { display: grid; grid-template-columns: 72px 1fr 72px; gap: 12px; align-items: center; }
   .target button { font-size: 34px; height: 72px; padding: 0; }
   .target input {
@@ -97,12 +100,6 @@
   .options button[aria-checked="true"]::after { content: "✓"; color: var(--ok); font-size: 22px; margin-left: 10px; }
   .opt-text { display: flex; flex-direction: column; gap: 2px; }
 
-  .toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; text-align: left; font-weight: 500; gap: 12px; }
-  .toggle small { color: var(--muted); font-weight: 400; font-size: 14px; }
-  .toggle .knob { flex: none; width: 52px; height: 32px; border-radius: 16px; background: var(--line); position: relative; transition: background .2s; }
-  .toggle .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; transition: transform .2s; }
-  .toggle[aria-checked="true"] .knob { background: var(--ok); }
-  .toggle[aria-checked="true"] .knob::after { transform: translateX(20px); }
   .vol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .vol button[aria-checked="true"] { border-color: var(--ok); background: #13301f; }
   input[type=range] { width: 100%; height: 44px; accent-color: var(--ok); margin: 0 0 6px; }
@@ -117,6 +114,8 @@
     padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 24px);
     text-align: center;
   }
+  #alert.cool { background: var(--blue); }
+  #alert.cool button.primary { color: #0b3d75; }
   #alert[hidden] { display: none; }
   #alert h1 { font-size: clamp(64px, 20vw, 96px); line-height: .95; margin: 0; font-weight: 900; }
   #alert .abpm { font-size: 40px; font-weight: 700; opacity: .9; font-variant-numeric: tabular-nums; }
@@ -151,13 +150,17 @@
   </section>
 
   <section class="card">
-    <div class="label">Target heart rate</div>
+    <div id="modes" class="modes" role="radiogroup">
+      <button data-mode="warm" role="radio">Warm-up ↑</button>
+      <button data-mode="cool" role="radio">Cool-down ↓</button>
+    </div>
+    <div id="targetLabel" class="label">Target heart rate</div>
     <div class="target">
       <button id="minus" aria-label="Lower target">−</button>
       <input id="target" type="number" inputmode="numeric" min="40" max="220" step="1" aria-label="Target BPM">
       <button id="plus" aria-label="Raise target">+</button>
     </div>
-    <div class="hint">Alerts when your heart rate stays at or above the target for 5 seconds.</div>
+    <div id="targetHint" class="hint"></div>
   </section>
 
   <section class="card">
@@ -176,17 +179,13 @@
     <div class="row" style="margin-top:12px">
       <button id="testBtn">Test alert</button>
     </div>
-    <button id="muteToggle" class="toggle" role="switch" style="margin-top:12px">
-      <span class="opt-text"><span>Play through silent mode</span><small>Sound even when the iPhone is on silent</small></span>
-      <span class="knob"></span>
-    </button>
-    <div class="hint">Takes effect on your next tap of Connect, Reconnect, Arm or Test. Keep Bluefy on screen: iOS pauses sound in the background.</div>
+    <div class="hint">Alerts play over your music. Keep the ringer on (the silent switch mutes them) and keep Bluefy on screen: iOS pauses sound in the background.</div>
   </section>
 </main>
 
 <div id="alert" hidden>
   <div id="testTag" class="tapnote" hidden>TEST</div>
-  <h1>Warmed up</h1>
+  <h1 id="alertTitle">Warmed up</h1>
   <div class="abpm"><span id="alertBpm">--</span> BPM</div>
   <div id="tapNote" class="tapnote"></div>
   <button id="doneBtn" class="primary">Done</button>
@@ -210,15 +209,19 @@
     { id: 'chime',   name: 'Single chime',    desc: 'Two-tone chime, once' },
     { id: 'repeat',  name: 'Repeating chime', desc: 'Every 10 s until you tap Stop' },
     { id: 'beep',    name: 'Soft beep',       desc: 'One short, quiet beep' },
-    { id: 'voice',   name: 'Voice',           desc: 'Says “Warmed up”' },
+    { id: 'voice',   name: 'Voice',           desc: 'Says “Warmed up” / “Cooled down”' },
     { id: 'silent',  name: 'Silent',          desc: 'Screen change only' },
   ];
 
-  let target = clampTarget(parseInt(store.get('targetBpm', '120'), 10));
+  const MODES = {
+    warm: { key: 'targetBpm',     def: 120, title: 'Warmed up',   label: 'Warm-up target',   hint: 'at or above', reached: (b, t) => b >= t },
+    cool: { key: 'coolTargetBpm', def: 100, title: 'Cooled down', label: 'Cool-down target', hint: 'at or below', reached: (b, t) => b <= t },
+  };
+  let mode = store.get('mode', 'warm') === 'cool' ? 'cool' : 'warm';
+  let target = clampTarget(parseInt(store.get(MODES[mode].key, String(MODES[mode].def)), 10));
   let alertType = store.get('alertType', 'chime');
   if (!OPTIONS.some(o => o.id === alertType)) alertType = 'chime';
   let volume = Math.min(2, Math.max(0, parseInt(store.get('volume', '1'), 10) || 0));
-  let bypassMute = store.get('bypassMute', '1') === '1';
 
   // ---------- Elements ----------
   const $ = id => document.getElementById(id);
@@ -233,12 +236,12 @@
   };
 
   // ---------- Target ----------
-  function clampTarget(n) { return Number.isFinite(n) ? Math.min(220, Math.max(40, n)) : 120; }
+  function clampTarget(n) { return Number.isFinite(n) ? Math.min(220, Math.max(40, n)) : MODES[mode].def; }
   function setTarget(n) {
     target = clampTarget(n);
     el.target.value = target;
-    store.set('targetBpm', target);
-    aboveSince = null;
+    store.set(MODES[mode].key, target);
+    atTargetSince = null;
     updateHold();
   }
   el.minus.addEventListener('click', () => setTarget(target - 1));
@@ -276,61 +279,12 @@
   el.volume.addEventListener('input', () => setVolume(+el.volume.value));
   for (const b of el.volButtons.children) b.addEventListener('click', () => setVolume(+b.dataset.v));
 
-  // ---------- Silent-switch bypass (iOS) ----------
-  // iOS treats Web Audio as "ambient" sound, which the ring/silent switch mutes.
-  // 1) Where available, the Audio Session API can ask for "playback" (media) sound.
-  // 2) Fallback: while an <audio> element is playing, iOS uses the media category
-  //    for the whole page, so we loop a generated silent clip (no audio file needed).
-  let silentEl = null;
-
-  function silentWavUrl() {
-    const rate = 8000, n = rate / 2;               // 0.5 s, 8-bit mono
-    const buf = new ArrayBuffer(44 + n), v = new DataView(buf);
-    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-    w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
-    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-    v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
-    w(36, 'data'); v.setUint32(40, n, true);
-    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);   // 128 = silence for 8-bit PCM
-    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-  }
-
-  function applyMuteBypass() {
-    try {
-      if (navigator.audioSession) navigator.audioSession.type = bypassMute ? 'playback' : 'auto';
-    } catch {}
-    try {
-      if (bypassMute) {
-        if (!silentEl) {
-          silentEl = document.createElement('audio');
-          silentEl.src = silentWavUrl();
-          silentEl.loop = true;
-          silentEl.setAttribute('playsinline', '');
-          silentEl.setAttribute('x-webkit-airplay', 'deny');
-          silentEl.preload = 'auto';
-        }
-        if (silentEl.paused) { const p = silentEl.play(); if (p && p.catch) p.catch(() => {}); }
-      } else if (silentEl && !silentEl.paused) {
-        silentEl.pause();
-      }
-    } catch {}
-  }
-
-  const muteToggle = document.getElementById('muteToggle');
-  function renderMuteToggle() { muteToggle.setAttribute('aria-checked', String(bypassMute)); }
-  muteToggle.addEventListener('click', () => {
-    bypassMute = !bypassMute;
-    store.set('bypassMute', bypassMute ? '1' : '0');
-    renderMuteToggle();
-    applyMuteBypass();   // this tap is a user gesture, so it can start the silent clip
-  });
-  renderMuteToggle();
-
   // ---------- Audio (Web Audio API) ----------
   let ctx = null, master = null;
 
   function unlockAudio() {
-    applyMuteBypass();   // set the audio session before creating/resuming the AudioContext
+    // "ambient" mixes with your music instead of pausing it (the silent switch will mute it).
+    try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch {}
     try {
       if (!ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -403,7 +357,7 @@
     try {
       if (!('speechSynthesis' in window)) return;
       speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance('Warmed up');
+      const u = new SpeechSynthesisUtterance(MODES[mode].title);
       u.volume = VOICE_VOLUMES[volume];
       u.rate = 1;
       speechSynthesis.speak(u);
@@ -421,20 +375,47 @@
   // over the target again does nothing until you tap Arm again.
   let armed = false;
   let firedOnce = false;
-  let aboveSince = null;
+  let atTargetSince = null;
   let lastBpm = null;
   let repeating = false, repeatTimeout = null, countdownTimer = null, nextChimeAt = 0;
 
   function renderArm() {
     el.arm.classList.toggle('armed', armed);
-    el.arm.textContent = armed ? 'Armed — tap to disarm' : 'Arm alert';
+    const name = mode === 'warm' ? 'warm-up' : 'cool-down';
+    el.arm.textContent = armed ? `Armed (${name}) — tap to disarm` : `Arm ${name} alert`;
+  }
+
+  function reached(bpm) { return MODES[mode].reached(bpm, target); }
+
+  // ---------- Mode (warm-up / cool-down) ----------
+  const modesEl = document.getElementById('modes');
+  function renderMode() {
+    const m = MODES[mode];
+    for (const b of modesEl.children) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+    document.getElementById('targetLabel').textContent = m.label;
+    document.getElementById('targetHint').textContent = `Alerts when your heart rate stays ${m.hint} the target for 5 seconds.`;
+    document.getElementById('alertTitle').textContent = m.title;
+    el.alert.classList.toggle('cool', mode === 'cool');
+  }
+  for (const b of modesEl.children) {
+    b.addEventListener('click', () => {
+      if (b.dataset.mode === mode) return;
+      mode = b.dataset.mode;
+      store.set('mode', mode);
+      armed = false;               // switching modes always disarms; tap Arm for the new mode
+      firedOnce = false;
+      setTarget(parseInt(store.get(MODES[mode].key, String(MODES[mode].def)), 10));
+      renderMode();
+      renderArm();
+      updateHold();
+    });
   }
 
   el.arm.addEventListener('click', () => {
     unlockAudio();                 // also a user gesture, so sound is ready when it fires
     armed = !armed;
-    aboveSince = null;             // always require a fresh 5 s hold after arming
-    if (armed && lastBpm != null && lastBpm >= target) aboveSince = Date.now();
+    atTargetSince = null;             // always require a fresh 5 s hold after arming
+    if (armed && lastBpm != null && reached(lastBpm)) atTargetSince = Date.now();
     renderArm();
     updateHold();
   });
@@ -445,7 +426,6 @@
     repeating = true;
     const tick = () => {
       if (!repeating) return;
-      applyMuteBypass();
       playChime();
       nextChimeAt = Date.now() + REPEAT_MS;
       repeatTimeout = setTimeout(tick, REPEAT_MS);
@@ -483,7 +463,7 @@
   function fireAlert() {
     armed = false;                 // disarm immediately: one alert per arming
     firedOnce = true;
-    aboveSince = null;
+    atTargetSince = null;
     renderArm();
     updateHold();
     showAlert(false);
@@ -506,14 +486,15 @@
     } else if (lastBpm == null) {
       el.hold.textContent = 'Waiting for heart rate…';
       el.hold.className = 'hold';
-    } else if (aboveSince != null) {
-      const ms = Date.now() - aboveSince;
+    } else if (atTargetSince != null) {
+      const ms = Date.now() - atTargetSince;
       pct = Math.min(100, (ms / HOLD_MS) * 100);
       const left = Math.max(0, Math.ceil((HOLD_MS - ms) / 1000));
       el.hold.textContent = `At target — hold ${left}s`;
       el.hold.className = 'hold active';
     } else {
-      el.hold.textContent = `${Math.max(0, target - lastBpm)} BPM to go (target ${target})`;
+      const gap = mode === 'warm' ? target - lastBpm : lastBpm - target;
+      el.hold.textContent = `${Math.max(0, gap)} BPM to go (target ${target})`;
       el.hold.className = 'hold';
     }
     el.holdBar.style.width = pct + '%';
@@ -522,8 +503,8 @@
   // Check the 5-second hold on a timer too, so the alert fires on time
   // even if the sensor only notifies every second or two.
   setInterval(() => {
-    if (armed && aboveSince != null && Date.now() - aboveSince >= HOLD_MS) fireAlert();
-    else if (armed && aboveSince != null) updateHold();
+    if (armed && atTargetSince != null && Date.now() - atTargetSince >= HOLD_MS) fireAlert();
+    else if (armed && atTargetSince != null) updateHold();
   }, 250);
 
   function onHeartRate(bpm) {
@@ -533,11 +514,11 @@
     el.alertBpm.textContent = bpm;
     el.heart.classList.remove('beat'); void el.heart.offsetWidth; el.heart.classList.add('beat');
 
-    if (bpm >= target) {
-      if (aboveSince == null) aboveSince = Date.now();
-      if (armed && Date.now() - aboveSince >= HOLD_MS) { fireAlert(); return; }
+    if (reached(bpm)) {
+      if (atTargetSince == null) atTargetSince = Date.now();
+      if (armed && Date.now() - atTargetSince >= HOLD_MS) { fireAlert(); return; }
     } else {
-      aboveSince = null;
+      atTargetSince = null;
     }
     updateHold();
   }
@@ -582,7 +563,7 @@
   function onDisconnected() {
     characteristic = null;
     lastBpm = null;
-    aboveSince = null;
+    atTargetSince = null;
     el.bpm.textContent = '--';
     el.bpm.classList.add('stale');
     updateHold();
@@ -656,7 +637,6 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       if (device) requestWakeLock();
-      if (ctx) applyMuteBypass();   // iOS pauses the silent clip in the background
       if (ctx && ctx.state !== 'running') { try { ctx.resume(); } catch {} }
     }
   });
@@ -665,6 +645,7 @@
   el.target.value = target;
   renderOptions();
   setVolume(volume);
+  renderMode();
   renderArm();
   if (!navigator.bluetooth) el.noBt.hidden = false;
   updateHold();

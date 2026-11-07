@@ -14,13 +14,14 @@ Open it in **Bluefy** on iPhone (or Chrome on Android/desktop). It needs HTTPS, 
 
 ## Using it
 1. Tap **Connect** and pick your tracker.
-2. Set the target, then tap **Arm alert** when you start warming up.
-3. When your heart rate holds at or above the target for 5 seconds, the alert fires once and disarms itself.
-   Tap **Arm alert** again for another round. **Test alert** previews the chosen alert without arming anything.
+2. Pick **Warm-up** (alert when heart rate rises to the target) or **Cool-down** (alert when it drops to the target).
+   Each mode remembers its own target. Set it, then tap **Arm** when you start.
+3. When your heart rate holds at the target (at or above for warm-up, at or below for cool-down) for 5 seconds, the alert fires once and disarms itself.
+   Tap **Arm** again for another round. Switching modes disarms the alert. **Test alert** previews the chosen alert without arming anything.
 
 ## Notes
 - Your watch or tracker must broadcast the standard BLE heart rate profile. Many Fitbit/Google devices
   only do this in a specific mode (e.g. "Heart rate on equipment" / HR broadcast during an exercise).
-- "Play through silent mode" (on by default) asks iOS for media-style sound so alerts play even when the
-  phone is on silent. It takes effect on your next tap of Connect, Reconnect or Test.
+- Alerts mix with music from other apps instead of pausing it. The iPhone silent switch mutes them,
+  so keep the ringer on.
 - iOS pauses audio when Bluefy is in the background, so keep the page on screen.
