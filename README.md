@@ -15,4 +15,6 @@ Open it in **Bluefy** on iPhone (or Chrome on Android/desktop). It needs HTTPS, 
 ## Notes
 - Your watch or tracker must broadcast the standard BLE heart rate profile. Many Fitbit/Google devices
   only do this in a specific mode (e.g. "Heart rate on equipment" / HR broadcast during an exercise).
-- On iPhone, the ring/silent switch can mute web audio, and iOS pauses audio when Bluefy is in the background.
+- "Play through silent mode" (on by default) asks iOS for media-style sound so alerts play even when the
+  phone is on silent. It takes effect on your next tap of Connect, Reconnect or Test.
+- iOS pauses audio when Bluefy is in the background, so keep the page on screen.
