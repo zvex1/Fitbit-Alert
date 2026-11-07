@@ -74,6 +74,10 @@
   .bar { height: 8px; background: var(--panel-2); border-radius: 4px; margin: 10px 18px 0; overflow: hidden; }
   .bar > div { height: 100%; width: 0; background: var(--warn); transition: width .3s linear; }
 
+  .arm { display: block; width: calc(100% - 20px); margin: 14px auto 2px; min-height: 64px; font-size: 20px;
+         background: var(--accent); border-color: var(--accent); color: #fff; }
+  .arm.armed { background: #13301f; border-color: var(--ok); color: var(--ok); }
+
   /* Cards */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px; }
   .label { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
@@ -143,6 +147,7 @@
     <div class="unit"><span id="heart" class="heart">♥</span> BPM</div>
     <div class="bar"><div id="holdBar"></div></div>
     <div id="hold" class="hold">Waiting for heart rate…</div>
+    <button id="armBtn" class="arm">Arm alert</button>
   </section>
 
   <section class="card">
@@ -175,16 +180,16 @@
       <span class="opt-text"><span>Play through silent mode</span><small>Sound even when the iPhone is on silent</small></span>
       <span class="knob"></span>
     </button>
-    <div class="hint">Takes effect on your next tap of Connect, Reconnect or Test. Keep Bluefy on screen: iOS pauses sound in the background.</div>
+    <div class="hint">Takes effect on your next tap of Connect, Reconnect, Arm or Test. Keep Bluefy on screen: iOS pauses sound in the background.</div>
   </section>
 </main>
 
 <div id="alert" hidden>
+  <div id="testTag" class="tapnote" hidden>TEST</div>
   <h1>Warmed up</h1>
   <div class="abpm"><span id="alertBpm">--</span> BPM</div>
   <div id="tapNote" class="tapnote"></div>
-  <button id="dismissBtn">Stop chime</button>
-  <button id="resetBtn" class="primary">Reset</button>
+  <button id="doneBtn" class="primary">Done</button>
 </div>
 
 <script>
@@ -203,7 +208,7 @@
   const VOICE_VOLUMES = [0.35, 0.7, 1.0];
   const OPTIONS = [
     { id: 'chime',   name: 'Single chime',    desc: 'Two-tone chime, once' },
-    { id: 'repeat',  name: 'Repeating chime', desc: 'Every 10 s until you tap' },
+    { id: 'repeat',  name: 'Repeating chime', desc: 'Every 10 s until you tap Stop' },
     { id: 'beep',    name: 'Soft beep',       desc: 'One short, quiet beep' },
     { id: 'voice',   name: 'Voice',           desc: 'Says “Warmed up”' },
     { id: 'silent',  name: 'Silent',          desc: 'Screen change only' },
@@ -224,7 +229,7 @@
     target: $('target'), minus: $('minus'), plus: $('plus'),
     options: $('options'), volume: $('volume'), volButtons: $('volButtons'), test: $('testBtn'),
     alert: $('alert'), alertBpm: $('alertBpm'), tapNote: $('tapNote'),
-    dismiss: $('dismissBtn'), reset: $('resetBtn'),
+    done: $('doneBtn'), testTag: $('testTag'), arm: $('armBtn'),
   };
 
   // ---------- Target ----------
@@ -373,6 +378,13 @@
 
   function playChime() {
     if (!ready()) return;
+    // If iOS suspended/interrupted the context, schedule only once it's running again,
+    // otherwise the notes get scheduled against a frozen clock and may be lost.
+    if (ctx.state !== 'running') { ctx.resume().then(chimeNotes, () => {}); return; }
+    chimeNotes();
+  }
+
+  function chimeNotes() {
     const t = ctx.currentTime + 0.05;
     // Note 1: E5 with a soft octave overtone; Note 2: A5 (a rising fourth).
     tone(659.25, t, 0.9, 0.55);
@@ -404,55 +416,92 @@
     else if (type === 'voice') speak();
   }
 
-  el.test.addEventListener('click', () => { unlockAudio(); playOnce(alertType); });
-
   // ---------- Alert state ----------
-  let armed = true;
+  // The alert only fires while armed. Firing disarms it straight away, so going
+  // over the target again does nothing until you tap Arm again.
+  let armed = false;
+  let firedOnce = false;
   let aboveSince = null;
-  let repeatTimer = null;
   let lastBpm = null;
+  let repeating = false, repeatTimeout = null, countdownTimer = null, nextChimeAt = 0;
 
-  function fireAlert() {
-    armed = false;
-    aboveSince = null;
+  function renderArm() {
+    el.arm.classList.toggle('armed', armed);
+    el.arm.textContent = armed ? 'Armed — tap to disarm' : 'Arm alert';
+  }
+
+  el.arm.addEventListener('click', () => {
+    unlockAudio();                 // also a user gesture, so sound is ready when it fires
+    armed = !armed;
+    aboveSince = null;             // always require a fresh 5 s hold after arming
+    if (armed && lastBpm != null && lastBpm >= target) aboveSince = Date.now();
+    renderArm();
+    updateHold();
+  });
+
+  // Repeating chime: chain timeouts (not setInterval) and re-wake audio before each chime.
+  function startRepeating() {
+    stopRepeating();
+    repeating = true;
+    const tick = () => {
+      if (!repeating) return;
+      applyMuteBypass();
+      playChime();
+      nextChimeAt = Date.now() + REPEAT_MS;
+      repeatTimeout = setTimeout(tick, REPEAT_MS);
+    };
+    tick();
+    const showCountdown = () => {
+      const s = Math.max(1, Math.ceil((nextChimeAt - Date.now()) / 1000));
+      el.tapNote.textContent = `Repeating — next chime in ${s}s`;
+    };
+    showCountdown();
+    countdownTimer = setInterval(showCountdown, 250);
+  }
+
+  function stopRepeating() {
+    repeating = false;
+    clearTimeout(repeatTimeout); repeatTimeout = null;
+    clearInterval(countdownTimer); countdownTimer = null;
+  }
+
+  function showAlert(isTest) {
+    el.testTag.hidden = !isTest;
     el.alertBpm.textContent = lastBpm ?? '--';
+    el.tapNote.textContent = '';
     el.alert.hidden = false;
-    const type = alertType;
-    playOnce(type);
-    if (type === 'repeat') {
-      repeatTimer = setInterval(() => playChime(), REPEAT_MS);
-      el.dismiss.hidden = false;
-      el.tapNote.textContent = 'Tap anywhere to stop the chime';
+    if (alertType === 'repeat') {
+      startRepeating();
+      el.done.textContent = 'Stop';
     } else {
-      el.dismiss.hidden = true;
-      el.tapNote.textContent = '';
+      playOnce(alertType);
+      el.done.textContent = 'Done';
     }
     try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch {}
-    updateHold();
   }
 
-  function stopRepeat() {
-    if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
-    el.dismiss.hidden = true;
-    el.tapNote.textContent = 'Tap Reset to arm again';
-  }
-
-  function resetAlert() {
-    stopRepeat();
-    try { speechSynthesis.cancel(); } catch {}
-    armed = true;
+  function fireAlert() {
+    armed = false;                 // disarm immediately: one alert per arming
+    firedOnce = true;
     aboveSince = null;
-    el.alert.hidden = true;
+    renderArm();
     updateHold();
+    showAlert(false);
   }
 
-  el.alert.addEventListener('click', e => { if (e.target !== el.reset) stopRepeat(); });
-  el.reset.addEventListener('click', e => { e.stopPropagation(); resetAlert(); });
+  function closeAlert() {
+    stopRepeating();
+    try { speechSynthesis.cancel(); } catch {}
+    el.alert.hidden = true;
+  }
+
+  el.done.addEventListener('click', closeAlert);
+  el.test.addEventListener('click', () => { unlockAudio(); showAlert(true); });
 
   function updateHold() {
     let pct = 0;
     if (!armed) {
-      el.hold.textContent = 'Alert fired — tap Reset to re-arm';
+      el.hold.textContent = firedOnce ? 'Alert done — tap Arm to set it again' : 'Not armed — tap Arm when you start';
       el.hold.className = 'hold';
     } else if (lastBpm == null) {
       el.hold.textContent = 'Waiting for heart rate…';
@@ -616,7 +665,7 @@
   el.target.value = target;
   renderOptions();
   setVolume(volume);
-  el.dismiss.hidden = true;
+  renderArm();
   if (!navigator.bluetooth) el.noBt.hidden = false;
   updateHold();
 })();
