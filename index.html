@@ -203,8 +203,10 @@
 
   const HOLD_MS = 5000;
   const REPEAT_MS = 10000;
-  const VOLUMES = [0.12, 0.35, 0.8];          // master gain for low / medium / high
-  const VOICE_VOLUMES = [0.35, 0.7, 1.0];
+  // Output gain after the limiter: High just under full scale, Medium -8 dB, Low -16 dB.
+  // Each step is clearly quieter than the one above, and Low is still audible.
+  const VOLUMES = [0.143, 0.36, 0.9];
+  const VOICE_VOLUMES = [0.3, 0.6, 1.0];
   const OPTIONS = [
     { id: 'chime',   name: 'Single chime',    desc: 'Two-tone chime, once' },
     { id: 'repeat',  name: 'Repeating chime', desc: 'Every 10 s until you tap Stop' },
@@ -280,7 +282,7 @@
   for (const b of el.volButtons.children) b.addEventListener('click', () => setVolume(+b.dataset.v));
 
   // ---------- Audio (Web Audio API) ----------
-  let ctx = null, master = null;
+  let ctx = null, bus = null, master = null;
 
   function unlockAudio() {
     // "ambient" mixes with your music instead of pausing it (the silent switch will mute it).
@@ -290,9 +292,22 @@
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
         ctx = new AC();
+        // notes -> compressor -> make-up gain -> limiter -> master (volume) -> speaker
+        // The compressor evens out the chime, the make-up gain brings it back up to
+        // near full scale, and the limiter stops it clipping. Master sets Low/Med/High.
+        bus = ctx.createGain();
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = -20; comp.knee.value = 8; comp.ratio.value = 6;
+        comp.attack.value = 0.003; comp.release.value = 0.3;
+        const makeup = ctx.createGain();
+        makeup.gain.value = 3.5;
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20;
+        limiter.attack.value = 0.001; limiter.release.value = 0.1;
         master = ctx.createGain();
         master.gain.value = VOLUMES[volume];
-        master.connect(ctx.destination);
+        bus.connect(comp); comp.connect(makeup); makeup.connect(limiter);
+        limiter.connect(master); master.connect(ctx.destination);
       }
       if (ctx.state !== 'running') ctx.resume();
       // Play a 1-sample silent buffer inside the gesture to fully unlock iOS.
@@ -319,7 +334,7 @@
     g.gain.setValueAtTime(0.0001, start);
     g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-    osc.connect(g); g.connect(master);
+    osc.connect(g); g.connect(bus);
     osc.start(start); osc.stop(start + dur + 0.05);
   }
 
@@ -338,19 +353,28 @@
     chimeNotes();
   }
 
+  // A bell-like note: the fundamental plus upper partials (which decay faster).
+  // The partials land in the 1-4 kHz range where phone speakers are loudest.
+  function bell(freq, start, dur, peak) {
+    tone(freq,        start, dur,        peak);
+    tone(freq * 2,    start, dur * 0.7,  peak * 0.5);
+    tone(freq * 3,    start, dur * 0.45, peak * 0.28);
+    tone(freq * 4.16, start, dur * 0.3,  peak * 0.14);
+  }
+
   function chimeNotes() {
     const t = ctx.currentTime + 0.05;
-    // Note 1: E5 with a soft octave overtone; Note 2: A5 (a rising fourth).
-    tone(659.25, t, 0.9, 0.55);
-    tone(1318.5, t, 0.5, 0.08);
-    tone(880.0, t + 0.22, 1.3, 0.55);
-    tone(1760.0, t + 0.22, 0.7, 0.08);
+    // E5 then A5 (a rising fourth).
+    bell(659.25, t,        1.4, 0.5);
+    bell(880.0,  t + 0.25, 2.0, 0.5);
   }
 
   function playBeep() {
     if (!ready()) return;
     const t = ctx.currentTime + 0.05;
-    tone(880, t, 0.16, 0.22);   // deliberately quieter than the chime
+    // Short and a bit softer than the chime, but it still follows Low / Medium / High.
+    tone(1046.5, t, 0.22, 0.45);
+    tone(2093, t, 0.14, 0.15);
   }
 
   function speak() {
